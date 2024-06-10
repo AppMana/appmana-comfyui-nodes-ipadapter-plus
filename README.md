@@ -1,3 +1,15 @@
+This is an installable fork of these IP Adapter nodes.
+
+`insightface` on Windows requires build tools to be installed. Using `chocolately`:
+
+```powershell
+choco install -y visualstudio2022buildtools
+# purposefully executed separately
+choco install -y visualstudio2022-workload-vctools
+# you will now successfully compile insightface
+pip install insightface
+```
+
 # ComfyUI IPAdapter plus
 [ComfyUI](https://github.com/comfyanonymous/ComfyUI) reference implementation for [IPAdapter](https://github.com/tencent-ailab/IP-Adapter/) models.
 

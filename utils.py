@@ -1,18 +1,24 @@
-import re
-import torch
 import os
-import folder_paths
-from comfy.clip_vision import clip_preprocess, Output
-import comfy.utils
+import re
+
+import torch
+
 import comfy.model_management as model_management
+import comfy.utils
+from comfy.clip_vision import clip_preprocess, Output
+from comfy.cmd import folder_paths
+from comfy.model_downloader import get_or_download, get_filename_list_with_downloadable, KNOWN_CLIP_VISION_MODELS
+from .known_models import FOLDER_NAME, KNOWN_IP_ADAPTER_MODELS
+
 try:
     import torchvision.transforms.v2 as T
 except ImportError:
     import torchvision.transforms as T
 
+
 def get_clipvision_file(preset):
     preset = preset.lower()
-    clipvision_list = folder_paths.get_filename_list("clip_vision")
+    clipvision_list = get_filename_list_with_downloadable("clip_vision", KNOWN_CLIP_VISION_MODELS)
 
     if preset.startswith("vit-g"):
         pattern = r'(ViT.bigG.14.*39B.b160k|ipadapter.*sdxl|sdxl.*model\.(bin|safetensors))'
@@ -20,13 +26,14 @@ def get_clipvision_file(preset):
         pattern = r'(ViT.H.14.*s32B.b79K|ipadapter.*sd15|sd1.?5.*model\.(bin|safetensors))'
     clipvision_file = [e for e in clipvision_list if re.search(pattern, e, re.IGNORECASE)]
 
-    clipvision_file = folder_paths.get_full_path("clip_vision", clipvision_file[0]) if clipvision_file else None
+    clipvision_file = get_or_download("clip_vision", clipvision_file[0], KNOWN_CLIP_VISION_MODELS) if clipvision_file else None
 
     return clipvision_file
 
+
 def get_ipadapter_file(preset, is_sdxl):
     preset = preset.lower()
-    ipadapter_list = folder_paths.get_filename_list("ipadapter")
+    ipadapter_list = get_filename_list_with_downloadable(FOLDER_NAME, KNOWN_IP_ADAPTER_MODELS)
     is_insightface = False
     lora_pattern = None
 
@@ -108,9 +115,10 @@ def get_ipadapter_file(preset, is_sdxl):
         raise Exception(f"invalid type '{preset}'")
 
     ipadapter_file = [e for e in ipadapter_list if re.search(pattern, e, re.IGNORECASE)]
-    ipadapter_file = folder_paths.get_full_path("ipadapter", ipadapter_file[0]) if ipadapter_file else None
+    ipadapter_file = get_or_download(FOLDER_NAME, ipadapter_file[0], KNOWN_IP_ADAPTER_MODELS) if ipadapter_file else None
 
     return ipadapter_file, is_insightface, lora_pattern
+
 
 def get_lora_file(pattern):
     lora_list = folder_paths.get_filename_list("loras")
@@ -118,6 +126,7 @@ def get_lora_file(pattern):
     lora_file = folder_paths.get_full_path("loras", lora_file[0]) if lora_file else None
 
     return lora_file
+
 
 def ipadapter_model_loader(file):
     model = comfy.utils.load_torch_file(file, safe_load=True)
@@ -137,11 +146,12 @@ def ipadapter_model_loader(file):
 
     if 'plusv2' in file.lower():
         model["faceidplusv2"] = True
-    
+
     if 'unnorm' in file.lower():
         model["portraitunnorm"] = True
 
     return model
+
 
 def insightface_loader(provider):
     try:
@@ -150,9 +160,10 @@ def insightface_loader(provider):
         raise Exception(e)
 
     path = os.path.join(folder_paths.models_dir, "insightface")
-    model = FaceAnalysis(name="buffalo_l", root=path, providers=[provider + 'ExecutionProvider',])
+    model = FaceAnalysis(name="buffalo_l", root=path, providers=[provider + 'ExecutionProvider', ])
     model.prepare(ctx_id=0, det_size=(640, 640))
     return model
+
 
 def encode_image_masked(clip_vision, image, mask=None, batch_size=0):
     model_management.load_model_gpu(clip_vision.patcher)
@@ -190,18 +201,20 @@ def encode_image_masked(clip_vision, image, mask=None, batch_size=0):
 
     return outputs
 
+
 def tensor_to_size(source, dest_size):
     if isinstance(dest_size, torch.Tensor):
         dest_size = dest_size.shape[0]
     source_size = source.shape[0]
 
     if source_size < dest_size:
-        shape = [dest_size - source_size] + [1]*(source.dim()-1)
+        shape = [dest_size - source_size] + [1] * (source.dim() - 1)
         source = torch.cat((source, source[-1:].repeat(shape)), dim=0)
     elif source_size > dest_size:
         source = source[:dest_size]
 
     return source
+
 
 def min_(tensor_list):
     # return the element-wise min of the tensor list.
@@ -209,11 +222,13 @@ def min_(tensor_list):
     mn = x.min(axis=0)[0]
     return torch.clamp(mn, min=0)
 
+
 def max_(tensor_list):
     # return the element-wise max of the tensor list.
     x = torch.stack(tensor_list)
     mx = x.max(axis=0)[0]
     return torch.clamp(mx, max=1)
+
 
 # From https://github.com/Jamy-L/Pytorch-Contrast-Adaptive-Sharpening/
 def contrast_adaptive_sharpening(image, amount):
@@ -246,19 +261,21 @@ def contrast_adaptive_sharpening(image, amount):
 
     # scaling
     amp = torch.sqrt(amp)
-    w = - amp * (amount * (1/5 - 1/8) + 1/8)
-    div = torch.reciprocal(1 + 4*w)
+    w = - amp * (amount * (1 / 5 - 1 / 8) + 1 / 8)
+    div = torch.reciprocal(1 + 4 * w)
 
-    output = ((b + d + f + h)*w + e) * div
+    output = ((b + d + f + h) * w + e) * div
     output = torch.nan_to_num(output)
     output = output.clamp(0, 1)
 
     return output
 
+
 def tensor_to_image(tensor):
     image = tensor.mul(255).clamp(0, 255).byte().cpu()
     image = image[..., [2, 1, 0]].numpy()
     return image
+
 
 def image_to_tensor(image):
     tensor = torch.clamp(torch.from_numpy(image).float() / 255., 0, 1)

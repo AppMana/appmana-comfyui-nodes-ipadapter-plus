@@ -1,16 +1,18 @@
-import torch
-import os
 import math
-import folder_paths
+import os
 
-import comfy.model_management as model_management
-from node_helpers import conditioning_set_values
-from comfy.clip_vision import load as load_clip_vision
-from comfy.sd import load_lora_for_models
-import comfy.utils
-
+import torch
 import torch.nn as nn
 from PIL import Image
+
+import comfy.model_management as model_management
+import comfy.utils
+from comfy.clip_vision import load as load_clip_vision
+from comfy.cmd import folder_paths
+from comfy.node_helpers import conditioning_set_values
+from comfy.sd import load_lora_for_models
+import comfy.model_base
+
 try:
     import torchvision.transforms.v2 as T
 except ImportError:
@@ -31,13 +33,6 @@ from .utils import (
     get_lora_file,
 )
 
-# set the models directory
-if "ipadapter" not in folder_paths.folder_names_and_paths:
-    current_paths = [os.path.join(folder_paths.models_dir, "ipadapter")]
-else:
-    current_paths, _ = folder_paths.folder_names_and_paths["ipadapter"]
-folder_paths.folder_names_and_paths["ipadapter"] = (current_paths, folder_paths.supported_pt_extensions)
-
 WEIGHT_TYPES = ["linear", "ease in", "ease out", 'ease in-out', 'reverse in-out', 'weak input', 'weak output', 'weak middle', 'strong middle', 'style transfer', 'composition', 'strong style transfer']
 
 """
@@ -45,6 +40,8 @@ WEIGHT_TYPES = ["linear", "ease in", "ease out", 'ease in-out', 'reverse in-out'
  Main IPAdapter Class
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 """
+
+
 class IPAdapter(nn.Module):
     def __init__(self, ipadapter_model, cross_attention_dim=1024, output_cross_attention_dim=1024, clip_embeddings_dim=1024, clip_extra_context_tokens=4, is_sdxl=False, is_plus=False, is_full=False, is_faceid=False, is_portrait_unnorm=False):
         super().__init__()
@@ -103,8 +100,8 @@ class IPAdapter(nn.Module):
             image_proj_model = ProjModelFaceIdPlus(
                 cross_attention_dim=self.cross_attention_dim,
                 id_embeddings_dim=512,
-                clip_embeddings_dim=self.clip_embeddings_dim, # 1280,
-                num_tokens=self.clip_extra_context_tokens, # 4,
+                clip_embeddings_dim=self.clip_embeddings_dim,  # 1280,
+                num_tokens=self.clip_extra_context_tokens,  # 4,
             )
         else:
             image_proj_model = MLPProjModelFaceId(
@@ -134,16 +131,16 @@ class IPAdapter(nn.Module):
         for ce, cez in zip(clip_embed, clip_embed_zeroed):
             image_prompt_embeds.append(self.image_proj_model(ce.to(torch_device)).to(intermediate_device))
             uncond_image_prompt_embeds.append(self.image_proj_model(cez.to(torch_device)).to(intermediate_device))
-        
+
         del clip_embed, clip_embed_zeroed
 
         image_prompt_embeds = torch.cat(image_prompt_embeds, dim=0)
         uncond_image_prompt_embeds = torch.cat(uncond_image_prompt_embeds, dim=0)
-        
+
         torch.cuda.empty_cache()
 
-        #image_prompt_embeds = self.image_proj_model(clip_embed)
-        #uncond_image_prompt_embeds = self.image_proj_model(clip_embed_zeroed)
+        # image_prompt_embeds = self.image_proj_model(clip_embed)
+        # uncond_image_prompt_embeds = self.image_proj_model(clip_embed_zeroed)
         return image_prompt_embeds, uncond_image_prompt_embeds
 
     @torch.inference_mode()
@@ -156,7 +153,7 @@ class IPAdapter(nn.Module):
             intermediate_device = torch_device
         elif batch_size > clip_embed.shape[0]:
             batch_size = clip_embed.shape[0]
-        
+
         face_embed_batch = torch.split(face_embed, batch_size, dim=0)
         clip_embed_batch = torch.split(clip_embed, batch_size, dim=0)
 
@@ -168,8 +165,9 @@ class IPAdapter(nn.Module):
 
         embeds = torch.cat(embeds, dim=0)
         torch.cuda.empty_cache()
-        #embeds = self.image_proj_model(face_embed, clip_embed, scale=s_scale, shortcut=shortcut)
+        # embeds = self.image_proj_model(face_embed, clip_embed, scale=s_scale, shortcut=shortcut)
         return embeds
+
 
 class To_KV(nn.Module):
     def __init__(self, state_dict):
@@ -179,6 +177,7 @@ class To_KV(nn.Module):
         for key, value in state_dict.items():
             self.to_kvs[key.replace(".weight", "").replace(".", "_")] = nn.Linear(value.shape[1], value.shape[0], bias=False)
             self.to_kvs[key.replace(".weight", "").replace(".", "_")].weight.data = value
+
 
 def set_model_patch_replace(model, patch_kwargs, key):
     to = model.model_options["transformer_options"].copy()
@@ -191,12 +190,13 @@ def set_model_patch_replace(model, patch_kwargs, key):
         to["patches_replace"]["attn2"] = {}
     else:
         to["patches_replace"]["attn2"] = to["patches_replace"]["attn2"].copy()
-    
+
     if key not in to["patches_replace"]["attn2"]:
         to["patches_replace"]["attn2"][key] = Attn2Replace(ipadapter_attention, **patch_kwargs)
         model.model_options["transformer_options"] = to
     else:
         to["patches_replace"]["attn2"][key].add(ipadapter_attention, **patch_kwargs)
+
 
 def ipadapter_execute(model,
                       ipadapter,
@@ -218,7 +218,7 @@ def ipadapter_execute(model,
                       unfold_batch=False,
                       embeds_scaling='V only',
                       layer_weights=None,
-                      encode_batch_size=0,):
+                      encode_batch_size=0, ):
     device = model_management.get_torch_device()
     dtype = model_management.unet_dtype()
     if dtype not in [torch.float32, torch.float16, torch.bfloat16]:
@@ -237,7 +237,7 @@ def ipadapter_execute(model,
         raise Exception("insightface model is required for FaceID models")
 
     if is_faceidv2:
-        weight_faceidv2 = weight_faceidv2 if weight_faceidv2 is not None else weight*2
+        weight_faceidv2 = weight_faceidv2 if weight_faceidv2 is not None else weight * 2
 
     cross_attention_dim = 1280 if (is_plus and is_sdxl and not is_faceid) or is_portrait_unnorm else output_cross_attention_dim
     clip_extra_context_tokens = 16 if (is_plus and not is_faceid) or is_portrait or is_portrait_unnorm else 4
@@ -250,27 +250,27 @@ def ipadapter_execute(model,
 
     # special weight types
     if layer_weights is not None and layer_weights != '':
-        weight = { int(k): float(v)*weight for k, v in [x.split(":") for x in layer_weights.split(",")] }
+        weight = {int(k): float(v) * weight for k, v in [x.split(":") for x in layer_weights.split(",")]}
         weight_type = "linear"
     elif weight_type.startswith("style transfer"):
-        weight = { 6:weight } if is_sdxl else { 0:weight, 1:weight, 2:weight, 3:weight, 9:weight, 10:weight, 11:weight, 12:weight, 13:weight, 14:weight, 15:weight }
+        weight = {6: weight} if is_sdxl else {0: weight, 1: weight, 2: weight, 3: weight, 9: weight, 10: weight, 11: weight, 12: weight, 13: weight, 14: weight, 15: weight}
     elif weight_type.startswith("composition"):
-        weight = { 3:weight } if is_sdxl else { 4:weight*0.25, 5:weight }
+        weight = {3: weight} if is_sdxl else {4: weight * 0.25, 5: weight}
     elif weight_type == "strong style transfer":
         if is_sdxl:
-            weight = { 0:weight, 1:weight, 2:weight, 4:weight, 5:weight, 6:weight, 7:weight, 8:weight, 9:weight, 10:weight }
+            weight = {0: weight, 1: weight, 2: weight, 4: weight, 5: weight, 6: weight, 7: weight, 8: weight, 9: weight, 10: weight}
         else:
-            weight = { 0:weight, 1:weight, 2:weight, 3:weight, 6:weight, 7:weight, 8:weight, 9:weight, 10:weight, 11:weight, 12:weight, 13:weight, 14:weight, 15:weight }
+            weight = {0: weight, 1: weight, 2: weight, 3: weight, 6: weight, 7: weight, 8: weight, 9: weight, 10: weight, 11: weight, 12: weight, 13: weight, 14: weight, 15: weight}
     elif weight_type == "style and composition":
         if is_sdxl:
-            weight = { 3:weight_composition, 6:weight }
+            weight = {3: weight_composition, 6: weight}
         else:
-            weight = { 0:weight, 1:weight, 2:weight, 3:weight, 4:weight_composition*0.25, 5:weight_composition, 9:weight, 10:weight, 11:weight, 12:weight, 13:weight, 14:weight, 15:weight }
+            weight = {0: weight, 1: weight, 2: weight, 3: weight, 4: weight_composition * 0.25, 5: weight_composition, 9: weight, 10: weight, 11: weight, 12: weight, 13: weight, 14: weight, 15: weight}
     elif weight_type == "strong style and composition":
         if is_sdxl:
-            weight = { 0:weight, 1:weight, 2:weight, 3:weight_composition, 4:weight, 5:weight, 6:weight, 7:weight, 8:weight, 9:weight, 10:weight }
+            weight = {0: weight, 1: weight, 2: weight, 3: weight_composition, 4: weight, 5: weight, 6: weight, 7: weight, 8: weight, 9: weight, 10: weight}
         else:
-            weight = { 0:weight, 1:weight, 2:weight, 3:weight, 4:weight_composition, 5:weight_composition, 6:weight, 7:weight, 8:weight, 9:weight, 10:weight, 11:weight, 12:weight, 13:weight, 14:weight, 15:weight }
+            weight = {0: weight, 1: weight, 2: weight, 3: weight, 4: weight_composition, 5: weight_composition, 6: weight, 7: weight, 8: weight, 9: weight, 10: weight, 11: weight, 12: weight, 13: weight, 14: weight, 15: weight}
 
     img_comp_cond_embeds = None
     face_cond_embeds = None
@@ -280,14 +280,14 @@ def ipadapter_execute(model,
 
         from insightface.utils import face_align
 
-        insightface.det_model.input_size = (640,640) # reset the detection size
+        insightface.det_model.input_size = (640, 640)  # reset the detection size
         image_iface = tensor_to_image(image)
         face_cond_embeds = []
         image = []
 
         for i in range(image_iface.shape[0]):
             for size in [(size, size) for size in range(640, 256, -64)]:
-                insightface.det_model.input_size = size # TODO: hacky but seems to be working
+                insightface.det_model.input_size = size  # TODO: hacky but seems to be working
                 face = insightface.get(image_iface[i])
                 if face:
                     if not is_portrait_unnorm:
@@ -325,8 +325,8 @@ def ipadapter_execute(model,
             if image_composition is not None:
                 img_comp_cond_embeds = img_comp_cond_embeds.image_embeds
         del image_negative, image_composition
-        
-        image = None if not is_faceid else image # if it's face_id we need the cropped face for later
+
+        image = None if not is_faceid else image  # if it's face_id we need the cropped face for later
     elif pos_embed is not None:
         img_cond_embeds = pos_embed
 
@@ -378,7 +378,7 @@ def ipadapter_execute(model,
                 face_cond_embeds = torch.mean(face_cond_embeds / torch.norm(face_cond_embeds, dim=0, keepdim=True), dim=0).unsqueeze(0)
             if img_comp_cond_embeds is not None:
                 img_comp_cond_embeds = torch.mean(img_comp_cond_embeds / torch.norm(img_comp_cond_embeds, dim=0, keepdim=True), dim=0).unsqueeze(0)
-        img_uncond_embeds = img_uncond_embeds[0].unsqueeze(0) # TODO: better strategy for uncond could be to average them
+        img_uncond_embeds = img_uncond_embeds[0].unsqueeze(0)  # TODO: better strategy for uncond could be to average them
 
     if attn_mask is not None:
         attn_mask = attn_mask.to(device, dtype=dtype)
@@ -396,6 +396,7 @@ def ipadapter_execute(model,
         is_portrait_unnorm=is_portrait_unnorm,
     ).to(device, dtype=dtype)
 
+    cond_comp = None
     if is_faceid and is_plus:
         cond = ipa.get_image_embeds_faceid_plus(face_cond_embeds, img_cond_embeds, weight_faceidv2, is_faceidv2, encode_batch_size)
         # TODO: check if noise helps with the uncond face embeds
@@ -410,7 +411,8 @@ def ipadapter_execute(model,
 
     cond_alt = None
     if img_comp_cond_embeds is not None:
-        cond_alt = { 3: cond_comp.to(device, dtype=dtype) }
+        assert cond_comp is not None
+        cond_alt = {3: cond_comp.to(device, dtype=dtype)}
 
     del img_cond_embeds, img_uncond_embeds, img_comp_cond_embeds, face_cond_embeds
 
@@ -433,65 +435,68 @@ def ipadapter_execute(model,
 
     number = 0
     if not is_sdxl:
-        for id in [1,2,4,5,7,8]: # id of input_blocks that have cross attention
-            patch_kwargs["module_key"] = str(number*2+1)
+        for id in [1, 2, 4, 5, 7, 8]:  # id of input_blocks that have cross attention
+            patch_kwargs["module_key"] = str(number * 2 + 1)
             set_model_patch_replace(model, patch_kwargs, ("input", id))
             number += 1
-        for id in [3,4,5,6,7,8,9,10,11]: # id of output_blocks that have cross attention
-            patch_kwargs["module_key"] = str(number*2+1)
+        for id in [3, 4, 5, 6, 7, 8, 9, 10, 11]:  # id of output_blocks that have cross attention
+            patch_kwargs["module_key"] = str(number * 2 + 1)
             set_model_patch_replace(model, patch_kwargs, ("output", id))
             number += 1
-        patch_kwargs["module_key"] = str(number*2+1)
+        patch_kwargs["module_key"] = str(number * 2 + 1)
         set_model_patch_replace(model, patch_kwargs, ("middle", 0))
     else:
-        for id in [4,5,7,8]: # id of input_blocks that have cross attention
-            block_indices = range(2) if id in [4, 5] else range(10) # transformer_depth
+        for id in [4, 5, 7, 8]:  # id of input_blocks that have cross attention
+            block_indices = range(2) if id in [4, 5] else range(10)  # transformer_depth
             for index in block_indices:
-                patch_kwargs["module_key"] = str(number*2+1)
+                patch_kwargs["module_key"] = str(number * 2 + 1)
                 set_model_patch_replace(model, patch_kwargs, ("input", id, index))
                 number += 1
-        for id in range(6): # id of output_blocks that have cross attention
-            block_indices = range(2) if id in [3, 4, 5] else range(10) # transformer_depth
+        for id in range(6):  # id of output_blocks that have cross attention
+            block_indices = range(2) if id in [3, 4, 5] else range(10)  # transformer_depth
             for index in block_indices:
-                patch_kwargs["module_key"] = str(number*2+1)
+                patch_kwargs["module_key"] = str(number * 2 + 1)
                 set_model_patch_replace(model, patch_kwargs, ("output", id, index))
                 number += 1
         for index in range(10):
-            patch_kwargs["module_key"] = str(number*2+1)
+            patch_kwargs["module_key"] = str(number * 2 + 1)
             set_model_patch_replace(model, patch_kwargs, ("middle", 0, index))
             number += 1
 
     return (model, image)
+
 
 """
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  Loaders
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 """
+
+
 class IPAdapterUnifiedLoader:
     def __init__(self):
         self.lora = None
-        self.clipvision = { "file": None, "model": None }
-        self.ipadapter = { "file": None, "model": None }
-        self.insightface = { "provider": None, "model": None }
+        self.clipvision = {"file": None, "model": None}
+        self.ipadapter = {"file": None, "model": None}
+        self.insightface = {"provider": None, "model": None}
 
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
-            "model": ("MODEL", ),
-            "preset": (['LIGHT - SD1.5 only (low strength)', 'STANDARD (medium strength)', 'VIT-G (medium strength)', 'PLUS (high strength)', 'PLUS FACE (portraits)', 'FULL FACE - SD1.5 only (portraits stronger)'], ),
+            "model": ("MODEL",),
+            "preset": (['LIGHT - SD1.5 only (low strength)', 'STANDARD (medium strength)', 'VIT-G (medium strength)', 'PLUS (high strength)', 'PLUS FACE (portraits)', 'FULL FACE - SD1.5 only (portraits stronger)'],),
         },
-        "optional": {
-            "ipadapter": ("IPADAPTER", ),
-        }}
+            "optional": {
+                "ipadapter": ("IPADAPTER",),
+            }}
 
-    RETURN_TYPES = ("MODEL", "IPADAPTER", )
-    RETURN_NAMES = ("model", "ipadapter", )
+    RETURN_TYPES = ("MODEL", "IPADAPTER",)
+    RETURN_NAMES = ("model", "ipadapter",)
     FUNCTION = "load_models"
     CATEGORY = "ipadapter"
 
     def load_models(self, model, preset, lora_strength=0.0, provider="CPU", ipadapter=None):
-        pipeline = { "clipvision": { 'file': None, 'model': None }, "ipadapter": { 'file': None, 'model': None }, "insightface": { 'provider': None, 'model': None } }
+        pipeline = {"clipvision": {'file': None, 'model': None}, "ipadapter": {'file': None, 'model': None}, "insightface": {'provider': None, 'model': None}}
         if ipadapter is not None:
             pipeline = ipadapter
 
@@ -538,7 +543,7 @@ class IPAdapterUnifiedLoader:
 
             if lora_model is None:
                 lora_model = comfy.utils.load_torch_file(lora_file, safe_load=True)
-                self.lora = { 'file': lora_file, 'model': lora_model }
+                self.lora = {'file': lora_file, 'model': lora_model}
                 print(f"\033[33mINFO: LoRA model loaded from {lora_file}\033[0m")
 
             if lora_strength > 0:
@@ -554,41 +559,44 @@ class IPAdapterUnifiedLoader:
                 else:
                     self.insightface = pipeline['insightface']
 
-        return (model, { 'clipvision': self.clipvision, 'ipadapter': self.ipadapter, 'insightface': self.insightface }, )
+        return (model, {'clipvision': self.clipvision, 'ipadapter': self.ipadapter, 'insightface': self.insightface},)
+
 
 class IPAdapterUnifiedLoaderFaceID(IPAdapterUnifiedLoader):
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
-            "model": ("MODEL", ),
-            "preset": (['FACEID', 'FACEID PLUS - SD1.5 only', 'FACEID PLUS V2', 'FACEID PORTRAIT (style transfer)', 'FACEID PORTRAIT UNNORM - SDXL only (strong)'], ),
-            "lora_strength": ("FLOAT", { "default": 0.6, "min": 0, "max": 1, "step": 0.01 }),
-            "provider": (["CPU", "CUDA", "ROCM", "DirectML", "OpenVINO", "CoreML"], ),
+            "model": ("MODEL",),
+            "preset": (['FACEID', 'FACEID PLUS - SD1.5 only', 'FACEID PLUS V2', 'FACEID PORTRAIT (style transfer)', 'FACEID PORTRAIT UNNORM - SDXL only (strong)'],),
+            "lora_strength": ("FLOAT", {"default": 0.6, "min": 0, "max": 1, "step": 0.01}),
+            "provider": (["CPU", "CUDA", "ROCM", "DirectML", "OpenVINO", "CoreML"],),
         },
-        "optional": {
-            "ipadapter": ("IPADAPTER", ),
-        }}
+            "optional": {
+                "ipadapter": ("IPADAPTER",),
+            }}
 
-    RETURN_NAMES = ("MODEL", "ipadapter", )
+    RETURN_NAMES = ("MODEL", "ipadapter",)
     CATEGORY = "ipadapter/faceid"
+
 
 class IPAdapterUnifiedLoaderCommunity(IPAdapterUnifiedLoader):
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
-            "model": ("MODEL", ),
-            "preset": (['Composition',], ),
+            "model": ("MODEL",),
+            "preset": (['Composition', ],),
         },
-        "optional": {
-            "ipadapter": ("IPADAPTER", ),
-        }}
+            "optional": {
+                "ipadapter": ("IPADAPTER",),
+            }}
 
     CATEGORY = "ipadapter/loaders"
+
 
 class IPAdapterModelLoader:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required": { "ipadapter_file": (folder_paths.get_filename_list("ipadapter"), )}}
+        return {"required": {"ipadapter_file": (folder_paths.get_filename_list("ipadapter"),)}}
 
     RETURN_TYPES = ("IPADAPTER",)
     FUNCTION = "load_ipadapter_model"
@@ -598,12 +606,13 @@ class IPAdapterModelLoader:
         ipadapter_file = folder_paths.get_full_path("ipadapter", ipadapter_file)
         return (ipadapter_model_loader(ipadapter_file),)
 
+
 class IPAdapterInsightFaceLoader:
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
-                "provider": (["CPU", "CUDA", "ROCM"], ),
+                "provider": (["CPU", "CUDA", "ROCM"],),
             },
         }
 
@@ -614,23 +623,26 @@ class IPAdapterInsightFaceLoader:
     def load_insightface(self, provider):
         return (insightface_loader(provider),)
 
+
 """
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  Main Apply Nodes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 """
+
+
 class IPAdapterSimple:
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
-                "model": ("MODEL", ),
-                "ipadapter": ("IPADAPTER", ),
+                "model": ("MODEL",),
+                "ipadapter": ("IPADAPTER",),
                 "image": ("IMAGE",),
-                "weight": ("FLOAT", { "default": 1.0, "min": -1, "max": 3, "step": 0.05 }),
-                "start_at": ("FLOAT", { "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
-                "end_at": ("FLOAT", { "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
-                "weight_type": (['standard', 'prompt is more important', 'style transfer'], ),
+                "weight": ("FLOAT", {"default": 1.0, "min": -1, "max": 3, "step": 0.05}),
+                "start_at": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "end_at": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "weight_type": (['standard', 'prompt is more important', 'style transfer'],),
             },
             "optional": {
                 "attn_mask": ("MASK",),
@@ -666,6 +678,7 @@ class IPAdapterSimple:
 
         return ipadapter_execute(model.clone(), ipadapter['ipadapter']['model'], ipadapter['clipvision']['model'], **ipa_args)
 
+
 class IPAdapterAdvanced:
     def __init__(self):
         self.unfold_batch = False
@@ -674,15 +687,15 @@ class IPAdapterAdvanced:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "model": ("MODEL", ),
-                "ipadapter": ("IPADAPTER", ),
+                "model": ("MODEL",),
+                "ipadapter": ("IPADAPTER",),
                 "image": ("IMAGE",),
-                "weight": ("FLOAT", { "default": 1.0, "min": -1, "max": 5, "step": 0.05 }),
-                "weight_type": (WEIGHT_TYPES, ),
+                "weight": ("FLOAT", {"default": 1.0, "min": -1, "max": 5, "step": 0.05}),
+                "weight_type": (WEIGHT_TYPES,),
                 "combine_embeds": (["concat", "add", "subtract", "average", "norm average"],),
-                "start_at": ("FLOAT", { "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
-                "end_at": ("FLOAT", { "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
-                "embeds_scaling": (['V only', 'K+V', 'K+V w/ C penalty', 'K+mean(V) w/ C penalty'], ),
+                "start_at": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "end_at": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "embeds_scaling": (['V only', 'K+V', 'K+V w/ C penalty', 'K+mean(V) w/ C penalty'],),
             },
             "optional": {
                 "image_negative": ("IMAGE",),
@@ -707,9 +720,9 @@ class IPAdapterAdvanced:
         if clip_vision is None:
             raise Exception("Missing CLIPVision model.")
 
-        if image_style is not None: # we are doing style + composition transfer
+        if image_style is not None:  # we are doing style + composition transfer
             if not is_sdxl:
-                raise Exception("Style + Composition transfer is only available for SDXL models at the moment.") # TODO: check feasibility for SD1.5 models
+                raise Exception("Style + Composition transfer is only available for SDXL models at the moment.")  # TODO: check feasibility for SD1.5 models
 
             image = image_style
             weight = weight_style
@@ -717,7 +730,7 @@ class IPAdapterAdvanced:
                 image_composition = image_style
 
             weight_type = "strong style and composition" if expand_style else "style and composition"
-        if ipadapter_params is not None: # we are doing batch processing
+        if ipadapter_params is not None:  # we are doing batch processing
             image = ipadapter_params['image']
             attn_mask = ipadapter_params['attn_mask']
             weight = ipadapter_params['weight']
@@ -732,6 +745,8 @@ class IPAdapterAdvanced:
 
         work_model = model.clone()
 
+        # todo: investigate the intention of `face_image` being overwritten in the loop
+        face_image = None
         for i in range(len(image)):
             if image[i] is None:
                 continue
@@ -758,7 +773,8 @@ class IPAdapterAdvanced:
             work_model, face_image = ipadapter_execute(work_model, ipadapter_model, clip_vision, **ipa_args)
 
         del ipadapter
-        return (work_model, face_image, )
+        return (work_model, face_image,)
+
 
 class IPAdapterBatch(IPAdapterAdvanced):
     def __init__(self):
@@ -768,15 +784,15 @@ class IPAdapterBatch(IPAdapterAdvanced):
     def INPUT_TYPES(s):
         return {
             "required": {
-                "model": ("MODEL", ),
-                "ipadapter": ("IPADAPTER", ),
+                "model": ("MODEL",),
+                "ipadapter": ("IPADAPTER",),
                 "image": ("IMAGE",),
-                "weight": ("FLOAT", { "default": 1.0, "min": -1, "max": 5, "step": 0.05 }),
-                "weight_type": (WEIGHT_TYPES, ),
-                "start_at": ("FLOAT", { "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
-                "end_at": ("FLOAT", { "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
-                "embeds_scaling": (['V only', 'K+V', 'K+V w/ C penalty', 'K+mean(V) w/ C penalty'], ),
-                "encode_batch_size": ("INT", { "default": 0, "min": 0, "max": 4096 }),
+                "weight": ("FLOAT", {"default": 1.0, "min": -1, "max": 5, "step": 0.05}),
+                "weight_type": (WEIGHT_TYPES,),
+                "start_at": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "end_at": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "embeds_scaling": (['V only', 'K+V', 'K+V w/ C penalty', 'K+mean(V) w/ C penalty'],),
+                "encode_batch_size": ("INT", {"default": 0, "min": 0, "max": 4096}),
             },
             "optional": {
                 "image_negative": ("IMAGE",),
@@ -785,22 +801,23 @@ class IPAdapterBatch(IPAdapterAdvanced):
             }
         }
 
+
 class IPAdapterStyleComposition(IPAdapterAdvanced):
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
-                "model": ("MODEL", ),
-                "ipadapter": ("IPADAPTER", ),
+                "model": ("MODEL",),
+                "ipadapter": ("IPADAPTER",),
                 "image_style": ("IMAGE",),
                 "image_composition": ("IMAGE",),
-                "weight_style": ("FLOAT", { "default": 1.0, "min": -1, "max": 5, "step": 0.05 }),
-                "weight_composition": ("FLOAT", { "default": 1.0, "min": -1, "max": 5, "step": 0.05 }),
-                "expand_style": ("BOOLEAN", { "default": False }),
+                "weight_style": ("FLOAT", {"default": 1.0, "min": -1, "max": 5, "step": 0.05}),
+                "weight_composition": ("FLOAT", {"default": 1.0, "min": -1, "max": 5, "step": 0.05}),
+                "expand_style": ("BOOLEAN", {"default": False}),
                 "combine_embeds": (["concat", "add", "subtract", "average", "norm average"], {"default": "average"}),
-                "start_at": ("FLOAT", { "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
-                "end_at": ("FLOAT", { "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
-                "embeds_scaling": (['V only', 'K+V', 'K+V w/ C penalty', 'K+mean(V) w/ C penalty'], ),
+                "start_at": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "end_at": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "embeds_scaling": (['V only', 'K+V', 'K+V w/ C penalty', 'K+mean(V) w/ C penalty'],),
             },
             "optional": {
                 "image_negative": ("IMAGE",),
@@ -811,6 +828,7 @@ class IPAdapterStyleComposition(IPAdapterAdvanced):
 
     CATEGORY = "ipadapter/style_composition"
 
+
 class IPAdapterStyleCompositionBatch(IPAdapterStyleComposition):
     def __init__(self):
         self.unfold_batch = True
@@ -819,16 +837,16 @@ class IPAdapterStyleCompositionBatch(IPAdapterStyleComposition):
     def INPUT_TYPES(s):
         return {
             "required": {
-                "model": ("MODEL", ),
-                "ipadapter": ("IPADAPTER", ),
+                "model": ("MODEL",),
+                "ipadapter": ("IPADAPTER",),
                 "image_style": ("IMAGE",),
                 "image_composition": ("IMAGE",),
-                "weight_style": ("FLOAT", { "default": 1.0, "min": -1, "max": 5, "step": 0.05 }),
-                "weight_composition": ("FLOAT", { "default": 1.0, "min": -1, "max": 5, "step": 0.05 }),
-                "expand_style": ("BOOLEAN", { "default": False }),
-                "start_at": ("FLOAT", { "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
-                "end_at": ("FLOAT", { "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
-                "embeds_scaling": (['V only', 'K+V', 'K+V w/ C penalty', 'K+mean(V) w/ C penalty'], ),
+                "weight_style": ("FLOAT", {"default": 1.0, "min": -1, "max": 5, "step": 0.05}),
+                "weight_composition": ("FLOAT", {"default": 1.0, "min": -1, "max": 5, "step": 0.05}),
+                "expand_style": ("BOOLEAN", {"default": False}),
+                "start_at": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "end_at": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "embeds_scaling": (['V only', 'K+V', 'K+V w/ C penalty', 'K+mean(V) w/ C penalty'],),
             },
             "optional": {
                 "image_negative": ("IMAGE",),
@@ -837,21 +855,22 @@ class IPAdapterStyleCompositionBatch(IPAdapterStyleComposition):
             }
         }
 
+
 class IPAdapterFaceID(IPAdapterAdvanced):
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
-                "model": ("MODEL", ),
-                "ipadapter": ("IPADAPTER", ),
+                "model": ("MODEL",),
+                "ipadapter": ("IPADAPTER",),
                 "image": ("IMAGE",),
-                "weight": ("FLOAT", { "default": 1.0, "min": -1, "max": 3, "step": 0.05 }),
-                "weight_faceidv2": ("FLOAT", { "default": 1.0, "min": -1, "max": 5.0, "step": 0.05 }),
-                "weight_type": (WEIGHT_TYPES, ),
+                "weight": ("FLOAT", {"default": 1.0, "min": -1, "max": 3, "step": 0.05}),
+                "weight_faceidv2": ("FLOAT", {"default": 1.0, "min": -1, "max": 5.0, "step": 0.05}),
+                "weight_type": (WEIGHT_TYPES,),
                 "combine_embeds": (["concat", "add", "subtract", "average", "norm average"],),
-                "start_at": ("FLOAT", { "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
-                "end_at": ("FLOAT", { "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
-                "embeds_scaling": (['V only', 'K+V', 'K+V w/ C penalty', 'K+mean(V) w/ C penalty'], ),
+                "start_at": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "end_at": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "embeds_scaling": (['V only', 'K+V', 'K+V w/ C penalty', 'K+mean(V) w/ C penalty'],),
             },
             "optional": {
                 "image_negative": ("IMAGE",),
@@ -862,12 +881,14 @@ class IPAdapterFaceID(IPAdapterAdvanced):
         }
 
     CATEGORY = "ipadapter/faceid"
-    RETURN_TYPES = ("MODEL","IMAGE",)
-    RETURN_NAMES = ("MODEL", "face_image", )
+    RETURN_TYPES = ("MODEL", "IMAGE",)
+    RETURN_NAMES = ("MODEL", "face_image",)
+
 
 class IPAAdapterFaceIDBatch(IPAdapterFaceID):
     def __init__(self):
         self.unfold_batch = True
+
 
 class IPAdapterTiled:
     def __init__(self):
@@ -877,16 +898,16 @@ class IPAdapterTiled:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "model": ("MODEL", ),
-                "ipadapter": ("IPADAPTER", ),
+                "model": ("MODEL",),
+                "ipadapter": ("IPADAPTER",),
                 "image": ("IMAGE",),
-                "weight": ("FLOAT", { "default": 1.0, "min": -1, "max": 3, "step": 0.05 }),
-                "weight_type": (WEIGHT_TYPES, ),
+                "weight": ("FLOAT", {"default": 1.0, "min": -1, "max": 3, "step": 0.05}),
+                "weight_type": (WEIGHT_TYPES,),
                 "combine_embeds": (["concat", "add", "subtract", "average", "norm average"],),
-                "start_at": ("FLOAT", { "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
-                "end_at": ("FLOAT", { "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
-                "sharpening": ("FLOAT", { "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05 }),
-                "embeds_scaling": (['V only', 'K+V', 'K+V w/ C penalty', 'K+mean(V) w/ C penalty'], ),
+                "start_at": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "end_at": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "sharpening": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05}),
+                "embeds_scaling": (['V only', 'K+V', 'K+V w/ C penalty', 'K+mean(V) w/ C penalty'],),
             },
             "optional": {
                 "image_negative": ("IMAGE",),
@@ -895,8 +916,8 @@ class IPAdapterTiled:
             }
         }
 
-    RETURN_TYPES = ("MODEL", "IMAGE", "MASK", )
-    RETURN_NAMES = ("MODEL", "tiles", "masks", )
+    RETURN_TYPES = ("MODEL", "IMAGE", "MASK",)
+    RETURN_NAMES = ("MODEL", "tiles", "masks",)
     FUNCTION = "apply_tiled"
     CATEGORY = "ipadapter/tiled"
 
@@ -915,12 +936,12 @@ class IPAdapterTiled:
         del ipadapter
 
         # 2. Extract the tiles
-        tile_size = 256     # I'm using 256 instead of 224 as it is more likely divisible by the latent size, it will be downscaled to 224 by the clip vision encoder
+        tile_size = 256  # I'm using 256 instead of 224 as it is more likely divisible by the latent size, it will be downscaled to 224 by the clip vision encoder
         _, oh, ow, _ = image.shape
         if attn_mask is None:
             attn_mask = torch.ones([1, oh, ow], dtype=image.dtype, device=image.device)
 
-        image = image.permute([0,3,1,2])
+        image = image.permute([0, 3, 1, 2])
         attn_mask = attn_mask.unsqueeze(1)
         # the mask should have the same proportions as the reference image and the latent
         attn_mask = T.Resize((oh, ow), interpolation=T.InterpolationMode.BICUBIC, antialias=True)(attn_mask)
@@ -929,14 +950,14 @@ class IPAdapterTiled:
         if oh / ow > 0.75 and oh / ow < 1.33:
             # crop the image to a square
             image = T.CenterCrop(min(oh, ow))(image)
-            resize = (tile_size*2, tile_size*2)
+            resize = (tile_size * 2, tile_size * 2)
 
             attn_mask = T.CenterCrop(min(oh, ow))(attn_mask)
         # otherwise resize the smallest side and the other proportionally
         else:
             resize = (int(tile_size * ow / oh), tile_size) if oh < ow else (tile_size, int(tile_size * oh / ow))
 
-         # using PIL for better results
+        # using PIL for better results
         imgs = []
         for img in image:
             img = T.ToPILImage()(img)
@@ -950,7 +971,7 @@ class IPAdapterTiled:
 
         # we allow a maximum of 4 tiles
         if oh / ow > 4 or oh / ow < 0.25:
-            crop = (tile_size, tile_size*4) if oh < ow else (tile_size*4, tile_size)
+            crop = (tile_size, tile_size * 4) if oh < ow else (tile_size * 4, tile_size)
             image = T.CenterCrop(crop)(image)
             attn_mask = T.CenterCrop(crop)(attn_mask)
 
@@ -959,7 +980,7 @@ class IPAdapterTiled:
         if sharpening > 0:
             image = contrast_adaptive_sharpening(image, sharpening)
 
-        image = image.permute([0,2,3,1])
+        image = image.permute([0, 2, 3, 1])
 
         _, oh, ow, _ = image.shape
 
@@ -978,9 +999,9 @@ class IPAdapterTiled:
             for x in range(tiles_x):
                 start_x = int(x * (tile_size - overlap_x))
                 start_y = int(y * (tile_size - overlap_y))
-                tiles.append(image[:, start_y:start_y+tile_size, start_x:start_x+tile_size, :])
+                tiles.append(image[:, start_y:start_y + tile_size, start_x:start_x + tile_size, :])
                 mask = base_mask.clone()
-                mask[:, start_y:start_y+tile_size, start_x:start_x+tile_size] = attn_mask[:, start_y:start_y+tile_size, start_x:start_x+tile_size]
+                mask[:, start_y:start_y + tile_size, start_x:start_x + tile_size] = attn_mask[:, start_y:start_y + tile_size, start_x:start_x + tile_size]
                 masks.append(mask)
         del mask
 
@@ -1003,7 +1024,8 @@ class IPAdapterTiled:
             # apply the ipadapter to the model without cloning it
             model, _ = ipadapter_execute(model, ipadapter_model, clip_vision, **ipa_args)
 
-        return (model, torch.cat(tiles), torch.cat(masks), )
+        return (model, torch.cat(tiles), torch.cat(masks),)
+
 
 class IPAdapterTiledBatch(IPAdapterTiled):
     def __init__(self):
@@ -1013,16 +1035,16 @@ class IPAdapterTiledBatch(IPAdapterTiled):
     def INPUT_TYPES(s):
         return {
             "required": {
-                "model": ("MODEL", ),
-                "ipadapter": ("IPADAPTER", ),
+                "model": ("MODEL",),
+                "ipadapter": ("IPADAPTER",),
                 "image": ("IMAGE",),
-                "weight": ("FLOAT", { "default": 1.0, "min": -1, "max": 3, "step": 0.05 }),
-                "weight_type": (WEIGHT_TYPES, ),
-                "start_at": ("FLOAT", { "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
-                "end_at": ("FLOAT", { "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
-                "sharpening": ("FLOAT", { "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05 }),
-                "embeds_scaling": (['V only', 'K+V', 'K+V w/ C penalty', 'K+mean(V) w/ C penalty'], ),
-                "encode_batch_size": ("INT", { "default": 0, "min": 0, "max": 4096 }),
+                "weight": ("FLOAT", {"default": 1.0, "min": -1, "max": 3, "step": 0.05}),
+                "weight_type": (WEIGHT_TYPES,),
+                "start_at": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "end_at": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "sharpening": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05}),
+                "embeds_scaling": (['V only', 'K+V', 'K+V w/ C penalty', 'K+mean(V) w/ C penalty'],),
+                "encode_batch_size": ("INT", {"default": 0, "min": 0, "max": 4096}),
             },
             "optional": {
                 "image_negative": ("IMAGE",),
@@ -1030,6 +1052,7 @@ class IPAdapterTiledBatch(IPAdapterTiled):
                 "clip_vision": ("CLIP_VISION",),
             }
         }
+
 
 class IPAdapterEmbeds:
 
@@ -1040,14 +1063,14 @@ class IPAdapterEmbeds:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "model": ("MODEL", ),
-                "ipadapter": ("IPADAPTER", ),
+                "model": ("MODEL",),
+                "ipadapter": ("IPADAPTER",),
                 "pos_embed": ("EMBEDS",),
-                "weight": ("FLOAT", { "default": 1.0, "min": -1, "max": 3, "step": 0.05 }),
-                "weight_type": (WEIGHT_TYPES, ),
-                "start_at": ("FLOAT", { "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
-                "end_at": ("FLOAT", { "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
-                "embeds_scaling": (['V only', 'K+V', 'K+V w/ C penalty', 'K+mean(V) w/ C penalty'], ),
+                "weight": ("FLOAT", {"default": 1.0, "min": -1, "max": 3, "step": 0.05}),
+                "weight_type": (WEIGHT_TYPES,),
+                "start_at": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "end_at": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "embeds_scaling": (['V only', 'K+V', 'K+V w/ C penalty', 'K+mean(V) w/ C penalty'],),
             },
             "optional": {
                 "neg_embed": ("EMBEDS",),
@@ -1087,8 +1110,9 @@ class IPAdapterEmbeds:
 
         return ipadapter_execute(model.clone(), ipadapter_model, clip_vision, **ipa_args)
 
+
 class IPAdapterEmbedsBatch(IPAdapterEmbeds):
-    
+
     def __init__(self):
         self.unfold_batch = True
 
@@ -1096,14 +1120,14 @@ class IPAdapterEmbedsBatch(IPAdapterEmbeds):
     def INPUT_TYPES(s):
         return {
             "required": {
-                "model": ("MODEL", ),
-                "ipadapter": ("IPADAPTER", ),
+                "model": ("MODEL",),
+                "ipadapter": ("IPADAPTER",),
                 "pos_embed": ("EMBEDS",),
-                "weight": ("FLOAT", { "default": 1.0, "min": -1, "max": 3, "step": 0.05 }),
-                "weight_type": (WEIGHT_TYPES, ),
-                "start_at": ("FLOAT", { "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
-                "end_at": ("FLOAT", { "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
-                "embeds_scaling": (['V only', 'K+V', 'K+V w/ C penalty', 'K+mean(V) w/ C penalty'], ),
+                "weight": ("FLOAT", {"default": 1.0, "min": -1, "max": 3, "step": 0.05}),
+                "weight_type": (WEIGHT_TYPES,),
+                "start_at": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "end_at": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "embeds_scaling": (['V only', 'K+V', 'K+V w/ C penalty', 'K+mean(V) w/ C penalty'],),
             },
             "optional": {
                 "neg_embed": ("EMBEDS",),
@@ -1112,22 +1136,23 @@ class IPAdapterEmbedsBatch(IPAdapterEmbeds):
             }
         }
 
+
 class IPAdapterMS(IPAdapterAdvanced):
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
-                "model": ("MODEL", ),
-                "ipadapter": ("IPADAPTER", ),
+                "model": ("MODEL",),
+                "ipadapter": ("IPADAPTER",),
                 "image": ("IMAGE",),
-                "weight": ("FLOAT", { "default": 1.0, "min": -1, "max": 5, "step": 0.05 }),
-                "weight_faceidv2": ("FLOAT", { "default": 1.0, "min": -1, "max": 5.0, "step": 0.05 }),
-                "weight_type": (WEIGHT_TYPES, ),
+                "weight": ("FLOAT", {"default": 1.0, "min": -1, "max": 5, "step": 0.05}),
+                "weight_faceidv2": ("FLOAT", {"default": 1.0, "min": -1, "max": 5.0, "step": 0.05}),
+                "weight_type": (WEIGHT_TYPES,),
                 "combine_embeds": (["concat", "add", "subtract", "average", "norm average"],),
-                "start_at": ("FLOAT", { "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
-                "end_at": ("FLOAT", { "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
-                "embeds_scaling": (['V only', 'K+V', 'K+V w/ C penalty', 'K+mean(V) w/ C penalty'], ),
-                "layer_weights": ("STRING", { "default": "", "multiline": True }),
+                "start_at": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "end_at": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+                "embeds_scaling": (['V only', 'K+V', 'K+V w/ C penalty', 'K+mean(V) w/ C penalty'],),
+                "layer_weights": ("STRING", {"default": "", "multiline": True}),
             },
             "optional": {
                 "image_negative": ("IMAGE",),
@@ -1139,16 +1164,17 @@ class IPAdapterMS(IPAdapterAdvanced):
 
     CATEGORY = "ipadapter/dev"
 
+
 class IPAdapterFromParams(IPAdapterAdvanced):
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
-                "model": ("MODEL", ),
-                "ipadapter": ("IPADAPTER", ),
-                "ipadapter_params": ("IPADAPTER_PARAMS", ),
+                "model": ("MODEL",),
+                "ipadapter": ("IPADAPTER",),
+                "ipadapter_params": ("IPADAPTER_PARAMS",),
                 "combine_embeds": (["concat", "add", "subtract", "average", "norm average"],),
-                "embeds_scaling": (['V only', 'K+V', 'K+V w/ C penalty', 'K+mean(V) w/ C penalty'], ),
+                "embeds_scaling": (['V only', 'K+V', 'K+V w/ C penalty', 'K+mean(V) w/ C penalty'],),
             },
             "optional": {
                 "image_negative": ("IMAGE",),
@@ -1158,19 +1184,22 @@ class IPAdapterFromParams(IPAdapterAdvanced):
 
     CATEGORY = "ipadapter/params"
 
+
 """
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  Helpers
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 """
+
+
 class IPAdapterEncoder:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
             "ipadapter": ("IPADAPTER",),
             "image": ("IMAGE",),
-            "weight": ("FLOAT", { "default": 1.0, "min": -1.0, "max": 3.0, "step": 0.01 }),
-            },
+            "weight": ("FLOAT", {"default": 1.0, "min": -1.0, "max": 3.0, "step": 0.01}),
+        },
             "optional": {
                 "mask": ("MASK",),
                 "clip_vision": ("CLIP_VISION",),
@@ -1203,7 +1232,7 @@ class IPAdapterEncoder:
                 T.Resize((224, 224), interpolation=T.InterpolationMode.BICUBIC, antialias=True),
             ])
             mask = transforms(mask).squeeze(1)
-            #mask = T.Resize((image.shape[1], image.shape[2]), interpolation=T.InterpolationMode.BICUBIC, antialias=True)(mask.unsqueeze(1)).squeeze(1)
+            # mask = T.Resize((image.shape[1], image.shape[2]), interpolation=T.InterpolationMode.BICUBIC, antialias=True)(mask.unsqueeze(1)).squeeze(1)
 
         img_cond_embeds = encode_image_masked(clip_vision, image, mask)
 
@@ -1217,29 +1246,30 @@ class IPAdapterEncoder:
         if weight != 1:
             img_cond_embeds = img_cond_embeds * weight
 
-        return (img_cond_embeds, img_uncond_embeds, )
+        return (img_cond_embeds, img_uncond_embeds,)
+
 
 class IPAdapterCombineEmbeds:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
             "embed1": ("EMBEDS",),
-            "method": (["concat", "add", "subtract", "average", "norm average", "max", "min"], ),
+            "method": (["concat", "add", "subtract", "average", "norm average", "max", "min"],),
         },
-        "optional": {
-            "embed2": ("EMBEDS",),
-            "embed3": ("EMBEDS",),
-            "embed4": ("EMBEDS",),
-            "embed5": ("EMBEDS",),
-        }}
+            "optional": {
+                "embed2": ("EMBEDS",),
+                "embed3": ("EMBEDS",),
+                "embed4": ("EMBEDS",),
+                "embed5": ("EMBEDS",),
+            }}
 
     RETURN_TYPES = ("EMBEDS",)
     FUNCTION = "batch"
     CATEGORY = "ipadapter/embeds"
 
     def batch(self, embed1, method, embed2=None, embed3=None, embed4=None, embed5=None):
-        if method=='concat' and embed2 is None and embed3 is None and embed4 is None and embed5 is None:
-            return (embed1, )
+        if method == 'concat' and embed2 is None and embed3 is None and embed4 is None and embed5 is None:
+            return (embed1,)
 
         embeds = [embed1, embed2, embed3, embed4, embed5]
         embeds = [embed for embed in embeds if embed is not None]
@@ -1259,16 +1289,17 @@ class IPAdapterCombineEmbeds:
         elif method == "min":
             embeds = torch.min(embeds, dim=0).values.unsqueeze(0)
 
-        return (embeds, )
+        return (embeds,)
+
 
 class IPAdapterNoise:
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
-                "type": (["fade", "dissolve", "gaussian", "shuffle"], ),
-                "strength": ("FLOAT", { "default": 1.0, "min": 0, "max": 1, "step": 0.05 }),
-                "blur": ("INT", { "default": 0, "min": 0, "max": 32, "step": 1 }),
+                "type": (["fade", "dissolve", "gaussian", "shuffle"],),
+                "strength": ("FLOAT", {"default": 1.0, "min": 0, "max": 1, "step": 0.05}),
+                "blur": ("INT", {"default": 0, "min": 0, "max": 32, "step": 1}),
             },
             "optional": {
                 "image_optional": ("IMAGE",),
@@ -1287,9 +1318,9 @@ class IPAdapterNoise:
                 T.CenterCrop(min(image_optional.shape[1], image_optional.shape[2])),
                 T.Resize((224, 224), interpolation=T.InterpolationMode.BICUBIC, antialias=True),
             ])
-            image = transforms(image_optional.permute([0,3,1,2])).permute([0,2,3,1])
+            image = transforms(image_optional.permute([0, 3, 1, 2])).permute([0, 2, 3, 1])
 
-        seed = int(torch.sum(image).item()) % 1000000007 # hash the image to get a seed, grants predictability
+        seed = int(torch.sum(image).item()) % 1000000007  # hash the image to get a seed, grants predictability
         torch.manual_seed(seed)
 
         if type == "fade":
@@ -1298,19 +1329,21 @@ class IPAdapterNoise:
         elif type == "dissolve":
             mask = (torch.rand_like(image) < strength).float()
             noise = torch.rand_like(image)
-            noise = image * (1-mask) + noise * mask
+            noise = image * (1 - mask) + noise * mask
         elif type == "gaussian":
             noise = torch.randn_like(image) * strength
             noise = image + noise
         elif type == "shuffle":
             transforms = T.Compose([
-                T.ElasticTransform(alpha=75.0, sigma=(1-strength)*3.5),
+                T.ElasticTransform(alpha=75.0, sigma=(1 - strength) * 3.5),
                 T.RandomVerticalFlip(p=1.0),
                 T.RandomHorizontalFlip(p=1.0),
             ])
-            image = transforms(image.permute([0,3,1,2])).permute([0,2,3,1])
-            noise = torch.randn_like(image) * (strength*0.75)
-            noise = image * (1-noise) + noise
+            image = transforms(image.permute([0, 3, 1, 2])).permute([0, 2, 3, 1])
+            noise = torch.randn_like(image) * (strength * 0.75)
+            noise = image * (1 - noise) + noise
+        else:
+            raise NotImplementedError("unsupported type")
 
         del image
         noise = torch.clamp(noise, 0, 1)
@@ -1318,9 +1351,10 @@ class IPAdapterNoise:
         if blur > 0:
             if blur % 2 == 0:
                 blur += 1
-            noise = T.functional.gaussian_blur(noise.permute([0,3,1,2]), blur).permute([0,2,3,1])
+            noise = T.functional.gaussian_blur(noise.permute([0, 3, 1, 2]), blur).permute([0, 2, 3, 1])
 
-        return (noise, )
+        return (noise,)
+
 
 class PrepImageForClipVision:
     @classmethod
@@ -1330,7 +1364,7 @@ class PrepImageForClipVision:
             "interpolation": (["LANCZOS", "BICUBIC", "HAMMING", "BILINEAR", "BOX", "NEAREST"],),
             "crop_position": (["top", "bottom", "left", "right", "center", "pad"],),
             "sharpening": ("FLOAT", {"default": 0.0, "min": 0, "max": 1, "step": 0.05}),
-            },
+        },
         }
 
     RETURN_TYPES = ("IMAGE",)
@@ -1341,7 +1375,7 @@ class PrepImageForClipVision:
     def prep_image(self, image, interpolation="LANCZOS", crop_position="center", sharpening=0.0):
         size = (224, 224)
         _, oh, ow, _ = image.shape
-        output = image.permute([0,3,1,2])
+        output = image.permute([0, 3, 1, 2])
 
         if crop_position == "pad":
             if oh != ow:
@@ -1351,28 +1385,30 @@ class PrepImageForClipVision:
                 elif ow > oh:
                     pad = (ow - oh) // 2
                     pad = (0, pad, 0, pad)
-                output = T.functional.pad(output, pad, fill=0)
+                else:
+                    raise NotImplementedError("unreachable")
+                output = T.functional.pad(output, list(pad), fill=0)
         else:
             crop_size = min(oh, ow)
-            x = (ow-crop_size) // 2
-            y = (oh-crop_size) // 2
+            x = (ow - crop_size) // 2
+            y = (oh - crop_size) // 2
             if "top" in crop_position:
                 y = 0
             elif "bottom" in crop_position:
-                y = oh-crop_size
+                y = oh - crop_size
             elif "left" in crop_position:
                 x = 0
             elif "right" in crop_position:
-                x = ow-crop_size
+                x = ow - crop_size
 
-            x2 = x+crop_size
-            y2 = y+crop_size
+            x2 = x + crop_size
+            y2 = y + crop_size
 
             output = output[:, :, y:y2, x:x2]
 
         imgs = []
         for img in output:
-            img = T.ToPILImage()(img) # using PIL for better results
+            img = T.ToPILImage()(img)  # using PIL for better results
             img = img.resize(size, resample=Image.Resampling[interpolation])
             imgs.append(T.ToTensor()(img))
         output = torch.stack(imgs, dim=0)
@@ -1381,9 +1417,10 @@ class PrepImageForClipVision:
         if sharpening > 0:
             output = contrast_adaptive_sharpening(output, sharpening)
 
-        output = output.permute([0,2,3,1])
+        output = output.permute([0, 2, 3, 1])
 
-        return (output, )
+        return (output,)
+
 
 class IPAdapterSaveEmbeds:
     def __init__(self):
@@ -1394,7 +1431,7 @@ class IPAdapterSaveEmbeds:
         return {"required": {
             "embeds": ("EMBEDS",),
             "filename_prefix": ("STRING", {"default": "IP_embeds"})
-            },
+        },
         }
 
     RETURN_TYPES = ()
@@ -1408,7 +1445,8 @@ class IPAdapterSaveEmbeds:
         file = os.path.join(full_output_folder, file)
 
         torch.save(embeds, file)
-        return (None, )
+        return (None,)
+
 
 class IPAdapterLoadEmbeds:
     @classmethod
@@ -1417,29 +1455,30 @@ class IPAdapterLoadEmbeds:
         files = [os.path.relpath(os.path.join(root, file), input_dir) for root, dirs, files in os.walk(input_dir) for file in files if file.endswith('.ipadpt')]
         return {"required": {"embeds": [sorted(files), ]}, }
 
-    RETURN_TYPES = ("EMBEDS", )
+    RETURN_TYPES = ("EMBEDS",)
     FUNCTION = "load"
     CATEGORY = "ipadapter/embeds"
 
     def load(self, embeds):
         path = folder_paths.get_annotated_filepath(embeds)
-        return (torch.load(path).cpu(), )
+        return (torch.load(path).cpu(),)
+
 
 class IPAdapterWeights:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
-            "weights": ("STRING", {"default": '1.0, 0.0', "multiline": True }),
-            "timing": (["custom", "linear", "ease_in_out", "ease_in", "ease_out", "random"], { "default": "linear" } ),
-            "frames": ("INT", {"default": 0, "min": 0, "max": 9999, "step": 1 }),
-            "start_frame": ("INT", {"default": 0, "min": 0, "max": 9999, "step": 1 }),
-            "end_frame": ("INT", {"default": 9999, "min": 0, "max": 9999, "step": 1 }),
-            "add_starting_frames": ("INT", {"default": 0, "min": 0, "max": 9999, "step": 1 }),
-            "add_ending_frames": ("INT", {"default": 0, "min": 0, "max": 9999, "step": 1 }),
-            "method": (["full batch", "shift batches", "alternate batches"], { "default": "full batch" }),
-            }, "optional": {
-                "image": ("IMAGE",),
-            }
+            "weights": ("STRING", {"default": '1.0, 0.0', "multiline": True}),
+            "timing": (["custom", "linear", "ease_in_out", "ease_in", "ease_out", "random"], {"default": "linear"}),
+            "frames": ("INT", {"default": 0, "min": 0, "max": 9999, "step": 1}),
+            "start_frame": ("INT", {"default": 0, "min": 0, "max": 9999, "step": 1}),
+            "end_frame": ("INT", {"default": 9999, "min": 0, "max": 9999, "step": 1}),
+            "add_starting_frames": ("INT", {"default": 0, "min": 0, "max": 9999, "step": 1}),
+            "add_ending_frames": ("INT", {"default": 0, "min": 0, "max": 9999, "step": 1}),
+            "method": (["full batch", "shift batches", "alternate batches"], {"default": "full batch"}),
+        }, "optional": {
+            "image": ("IMAGE",),
+        }
         }
 
     RETURN_TYPES = ("FLOAT", "FLOAT", "INT", "IMAGE", "IMAGE", "WEIGHTS_STRATEGY")
@@ -1486,7 +1525,7 @@ class IPAdapterWeights:
             if len(weights) > 0:
                 start = weights[0]
                 end = weights[-1]
-            
+
             weights = []
 
             end_frame = min(end_frame, frames)
@@ -1515,7 +1554,7 @@ class IPAdapterWeights:
             weights = [0.0]
 
         frames = len(weights)
-        
+
         # repeat the images for cross fade
         image_1 = None
         image_2 = None
@@ -1523,7 +1562,7 @@ class IPAdapterWeights:
             if "shift" in method:
                 image_1 = image[:-1]
                 image_2 = image[1:]
-                
+
                 weights = weights * image_1.shape[0]
                 image_1 = image_1.repeat_interleave(frames, 0)
                 image_2 = image_2.repeat_interleave(frames, 0)
@@ -1565,26 +1604,28 @@ class IPAdapterWeights:
 
         return (weights, weights_invert, frame_count, image_1, image_2, weights_strategy,)
 
+
 class IPAdapterWeightsFromStrategy(IPAdapterWeights):
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
             "weights_strategy": ("WEIGHTS_STRATEGY",),
-            }, "optional": {
-                "image": ("IMAGE",),
-            }
+        }, "optional": {
+            "image": ("IMAGE",),
         }
+        }
+
 
 class IPAdapterPromptScheduleFromWeightsStrategy():
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
             "weights_strategy": ("WEIGHTS_STRATEGY",),
-            "prompt": ("STRING", {"default": "", "multiline": True }),
-            }}
-    
+            "prompt": ("STRING", {"default": "", "multiline": True}),
+        }}
+
     RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("prompt_schedule", )
+    RETURN_NAMES = ("prompt_schedule",)
     FUNCTION = "prompt_schedule"
     CATEGORY = "ipadapter/weights"
 
@@ -1612,16 +1653,18 @@ class IPAdapterPromptScheduleFromWeightsStrategy():
             if add_ending_frames > 0:
                 out += f"\"{frame_count * frames + add_starting_frames}\": \"{prompt[-1]}\",\n"
 
-        return (out, )
+        return (out,)
+
 
 class IPAdapterCombineWeights:
     @classmethod
     def INPUT_TYPES(s):
         return {
-        "required": {
-            "weights_1": ("FLOAT", { "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05 }),
-            "weights_2": ("FLOAT", { "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05 }),
-        }}
+            "required": {
+                "weights_1": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05}),
+                "weights_2": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05}),
+            }}
+
     RETURN_TYPES = ("FLOAT", "INT")
     RETURN_NAMES = ("weights", "count")
     FUNCTION = "combine"
@@ -1634,33 +1677,34 @@ class IPAdapterCombineWeights:
             weights_2 = [weights_2]
         weights = weights_1 + weights_2
 
-        return (weights, len(weights), )
+        return (weights, len(weights),)
+
 
 class IPAdapterRegionalConditioning:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
-            #"set_cond_area": (["default", "mask bounds"],),
+            # "set_cond_area": (["default", "mask bounds"],),
             "image": ("IMAGE",),
-            "image_weight": ("FLOAT", { "default": 1.0, "min": -1.0, "max": 3.0, "step": 0.05 }),
-            "prompt_weight": ("FLOAT", { "default": 1.0, "min": 0.0, "max": 10.0, "step": 0.05 }),
-            "weight_type": (WEIGHT_TYPES, ),
-            "start_at": ("FLOAT", { "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
-            "end_at": ("FLOAT", { "default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
+            "image_weight": ("FLOAT", {"default": 1.0, "min": -1.0, "max": 3.0, "step": 0.05}),
+            "prompt_weight": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.05}),
+            "weight_type": (WEIGHT_TYPES,),
+            "start_at": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001}),
+            "end_at": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001}),
         }, "optional": {
             "mask": ("MASK",),
             "positive": ("CONDITIONING",),
             "negative": ("CONDITIONING",),
         }}
 
-    RETURN_TYPES = ("IPADAPTER_PARAMS", "CONDITIONING", "CONDITIONING", )
+    RETURN_TYPES = ("IPADAPTER_PARAMS", "CONDITIONING", "CONDITIONING",)
     RETURN_NAMES = ("IPADAPTER_PARAMS", "POSITIVE", "NEGATIVE")
     FUNCTION = "conditioning"
 
     CATEGORY = "ipadapter/params"
 
     def conditioning(self, image, image_weight, prompt_weight, weight_type, start_at, end_at, mask=None, positive=None, negative=None):
-        set_area_to_bounds = False #if set_cond_area == "default" else True
+        set_area_to_bounds = False  # if set_cond_area == "default" else True
 
         if mask is not None:
             if positive is not None:
@@ -1676,8 +1720,9 @@ class IPAdapterRegionalConditioning:
             "start_at": [start_at],
             "end_at": [end_at],
         }
-        
-        return (ipadapter_params, positive, negative, )
+
+        return (ipadapter_params, positive, negative,)
+
 
 class IPAdapterCombineParams:
     @classmethod
@@ -1690,7 +1735,7 @@ class IPAdapterCombineParams:
             "params_4": ("IPADAPTER_PARAMS",),
             "params_5": ("IPADAPTER_PARAMS",),
         }}
-    
+
     RETURN_TYPES = ("IPADAPTER_PARAMS",)
     FUNCTION = "combine"
     CATEGORY = "ipadapter/params"
@@ -1727,7 +1772,8 @@ class IPAdapterCombineParams:
             ipadapter_params["start_at"] += params_5["start_at"]
             ipadapter_params["end_at"] += params_5["end_at"]
 
-        return (ipadapter_params, )
+        return (ipadapter_params,)
+
 
 """
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
