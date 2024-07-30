@@ -8,6 +8,7 @@ import comfy.utils
 from comfy.clip_vision import clip_preprocess, Output
 from comfy.cmd import folder_paths
 from comfy.model_downloader import get_or_download, get_filename_list_with_downloadable, KNOWN_CLIP_VISION_MODELS
+from comfy.model_management import load_models_gpu
 from .known_models import FOLDER_NAME, KNOWN_IP_ADAPTER_MODELS
 
 try:
@@ -166,7 +167,7 @@ def insightface_loader(provider):
 
 
 def encode_image_masked(clip_vision, image, mask=None, batch_size=0):
-    model_management.load_model_gpu(clip_vision.patcher)
+    load_models_gpu([clip_vision.patcher])
     outputs = Output()
 
     if batch_size == 0:
