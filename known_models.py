@@ -26,6 +26,7 @@ KNOWN_IP_ADAPTER_MODELS = [
     HuggingFile("h94/IP-Adapter-FaceID", "ip-adapter_sd15_light_v11.bin"),
     HuggingFile("ostris/ip-composition-adapter", "ip_plus_composition_sd15.safetensors"),
     HuggingFile("ostris/ip-composition-adapter", "ip_plus_composition_sdxl.safetensors"),
+    HuggingFile("Kwai-Kolors/Kolors-IP-Adapter-Plus", "ip_adapter_plus_general.bin", save_with_filename="Kolors-IP-Adapter-Plus.bin"),
 ]
 
 add_known_models("clip_vision",
@@ -33,7 +34,9 @@ add_known_models("clip_vision",
                  HuggingFile("h94/IP-Adapter", "models/image_encoder/model.safetensors",
                              save_with_filename="laion_CLIP-ViT-bigG-14-laion2B-39B-b160k.safetensors"),
                  HuggingFile("h94/IP-Adapter", "sdxl_models/image_encoder/model.safetensors",
-                             save_with_filename="laion_CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors")
+                             save_with_filename="laion_CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"),
+                 HuggingFile("Kwai-Kolors/Kolors-IP-Adapter-Plus", "image_encoder/pytorch_model.bin",
+                             save_with_filename="clip-vit-large-patch14-336.bin"),
                  )
 
 add_known_models("loras",
