@@ -29,7 +29,6 @@ If you like my work and wish to see updates and new features please consider spo
 - [ComfyUI InstantID (Native)](https://github.com/cubiq/ComfyUI_InstantID)
 - [ComfyUI Essentials](https://github.com/cubiq/ComfyUI_essentials)
 - [ComfyUI FaceAnalysis](https://github.com/cubiq/ComfyUI_FaceAnalysis)
-- [Comfy Dungeon](https://github.com/cubiq/Comfy_Dungeon)
 
 Not to mention the documentation and videos tutorials. Check my **ComfyUI Advanced Understanding** videos on YouTube for example, [part 1](https://www.youtube.com/watch?v=_C7kR2TFIX0) and [part 2](https://www.youtube.com/watch?v=ijqXnW_9gzc)
 
@@ -38,6 +37,10 @@ The only way to keep the code open and free is by sponsoring its development. Th
 Please consider a [Github Sponsorship](https://github.com/sponsors/cubiq) or [PayPal donation](https://paypal.me/matt3o) (Matteo "matt3o" Spinelli). For sponsorships of $50+, let me know if you'd like to be mentioned in this readme file, you can find me on [Discord](https://latent.vision/discord) or _matt3o :snail: gmail.com_.
 
 ## Important updates
+
+**2024/09/13**: Fixed a nasty bug in the middle block patching that we are carrying around since the beginning. Unfortunately the generated images won't be exactly the same as before. Anyway the middle block doesn't have a huge impact, so it shouldn't be a big deal. It does **not** impact Style or Composition transfer, only linear generations. I do not generally report on small bug fixes but this one may cause different results so I thought it's worth mentioning.
+
+**2024/08/02**: Support for Kolors FaceIDv2. Please check the [example workflow](./examples/IPAdapter_FaceIDv2_Kolors.json) for best practices.
 
 **2024/07/26**: Added support for image batches and animation to the ClipVision Enhancer.
 
@@ -60,8 +63,6 @@ Please consider a [Github Sponsorship](https://github.com/sponsors/cubiq) or [Pa
 **2024/04/21**: Added Regional Conditioning nodes to simplify attention masking and masked text conditioning.
 
 **2024/04/16**: Added support for the new SDXL portrait unnorm model (link below). It's very strong and tends to ignore the text conditioning. Lower the CFG to 3-4 or use a RescaleCFG node.
-
-**2024/04/12**: Added scheduled weights. Useful for animations.
 
 *(Older updates removed for readability)*
 
@@ -143,6 +144,7 @@ The community has baked some interesting IPAdapter models.
     - [ip_plus_composition_sd15.safetensors](https://huggingface.co/ostris/ip-composition-adapter/resolve/main/ip_plus_composition_sd15.safetensors), general composition ignoring style and content, more about it [here](https://huggingface.co/ostris/ip-composition-adapter)
     - [ip_plus_composition_sdxl.safetensors](https://huggingface.co/ostris/ip-composition-adapter/resolve/main/ip_plus_composition_sdxl.safetensors), SDXL version
     - [Kolors-IP-Adapter-Plus.bin](https://huggingface.co/Kwai-Kolors/Kolors-IP-Adapter-Plus/resolve/main/ip_adapter_plus_general.bin?download=true), IPAdapter Plus for Kolors model
+    - [Kolors-IP-Adapter-FaceID-Plus.bin](https://huggingface.co/Kwai-Kolors/Kolors-IP-Adapter-FaceID-Plus/resolve/main/ipa-faceid-plus.bin?download=true), IPAdapter FaceIDv2 for Kolors model. **Note:** Kolors is trained on InsightFace  **antelopev2** model, you need to [manually download it](https://huggingface.co/MonsterMMORPG/tools/tree/main) and place it inside the `models/inisghtface` directory.
 
 if you know of other models please let me know and I will add them to the unified loader.
 
@@ -166,29 +168,24 @@ It's only thanks to generous sponsors that **the whole community** can enjoy ope
 
 ### :trophy: Gold sponsors
 
-[![Kaiber.ai](https://f.latent.vision/imgs/kaiber.png)](https://kaiber.ai/)&nbsp; &nbsp;[![Kaiber.ai](https://f.latent.vision/imgs/replicate.png)](https://replicate.com/)
+[![Kaiber.ai](https://f.latent.vision/imgs/kaiber.png)](https://kaiber.ai/)&nbsp; &nbsp;[![InstaSD](https://f.latent.vision/imgs/instasd.png)](https://www.instasd.com/)
 
 ### :tada: Silver sponsors
 
-[![OperArt.ai](https://f.latent.vision/imgs/openart.png?r=1)](https://openart.ai/workflows)&nbsp; &nbsp;[![OperArt.ai](https://f.latent.vision/imgs/finetuners.png)](https://www.finetuners.ai/)&nbsp; &nbsp;[![Comfy.ICU](https://f.latent.vision/imgs/comfyicu.png?r=1)](https://comfy.icu/)
+[![OperArt.ai](https://f.latent.vision/imgs/openart.png?r=1)](https://openart.ai/workflows)&nbsp; &nbsp;[![Finetuners](https://f.latent.vision/imgs/finetuners.png)](https://www.finetuners.ai/)&nbsp; &nbsp;[![Comfy.ICU](https://f.latent.vision/imgs/comfyicu.png?r=1)](https://comfy.icu/)
 
-### Companies supporting my projects
+### Other companies supporting my projects
 
 - [RunComfy](https://www.runcomfy.com/) (ComfyUI Cloud)
 
 ### Esteemed individuals
 
+- [Øystein Ø. Olsen](https://github.com/FireNeslo)
 - [Jack Gane](https://github.com/ganeJackS)
 - [Nathan Shipley](https://www.nathanshipley.com/)
 - [Dkdnzia](https://github.com/Dkdnzia)
 
-### One-time Extraordinaires
-
-- [Eric Rollei](https://github.com/EricRollei)
-- [francaleu](https://github.com/francaleu)
-- [Neta.art](https://github.com/talesofai)
-- [Samwise Wang](https://github.com/tzwm)
-- _And all private sponsors, you know who you are!_
+[And all my public and private sponsors!](https://github.com/sponsors/cubiq)
 
 ## Credits
 

@@ -22,11 +22,11 @@ def get_clipvision_file(preset):
     clipvision_list = get_filename_list_with_downloadable("clip_vision", KNOWN_CLIP_VISION_MODELS)
 
     if preset.startswith("vit-g"):
-        pattern = r'(ViT.bigG.14.*39B.b160k|ipadapter.*sdxl|sdxl.*model\.(bin|safetensors))'
+        pattern = r'(ViT.bigG.14.*39B.b160k|ipadapter.*sdxl|sdxl.*model)\.(bin|safetensors)'
     elif preset.startswith("kolors"):
-        pattern = r'(clip.vit.large.patch14.336\.(bin|safetensors))'
+        pattern = r'clip.vit.large.patch14.336\.(bin|safetensors)'
     else:
-        pattern = r'(ViT.H.14.*s32B.b79K|ipadapter.*sd15|sd1.?5.*model\.(bin|safetensors))'
+        pattern = r'(ViT.H.14.*s32B.b79K|ipadapter.*sd15|sd1.?5.*model)\.(bin|safetensors)'
     clipvision_file = [e for e in clipvision_list if re.search(pattern, e, re.IGNORECASE)]
 
     clipvision_file = get_or_download("clip_vision", clipvision_file[0], KNOWN_CLIP_VISION_MODELS) if clipvision_file else None
@@ -146,8 +146,12 @@ def ipadapter_model_loader(file):
                 st_model["image_proj"][key.replace("image_proj.", "")] = model[key]
             elif key.startswith("ip_adapter."):
                 st_model["ip_adapter"][key.replace("ip_adapter.", "")] = model[key]
+            elif key.startswith("adapter_modules."):
+                st_model["ip_adapter"][key.replace("adapter_modules.", "")] = model[key]
         model = st_model
         del st_model
+    elif "adapter_modules" in model.keys():
+        model["ip_adapter"] = model.pop("adapter_modules")
 
     if not "ip_adapter" in model.keys() or not model["ip_adapter"]:
         raise Exception("invalid IPAdapter model {}".format(file))
@@ -161,14 +165,14 @@ def ipadapter_model_loader(file):
     return model
 
 
-def insightface_loader(provider):
+def insightface_loader(provider, model_name='buffalo_l'):
     try:
         from insightface.app import FaceAnalysis
     except ImportError as e:
         raise Exception(e)
 
     path = os.path.join(folder_paths.models_dir, "insightface")
-    model = FaceAnalysis(name="buffalo_l", root=path, providers=[provider + 'ExecutionProvider', ])
+    model = FaceAnalysis(name=model_name, root=path, providers=[provider + 'ExecutionProvider', ])
     model.prepare(ctx_id=0, det_size=(640, 640))
     return model
 
