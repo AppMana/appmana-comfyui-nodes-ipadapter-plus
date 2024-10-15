@@ -9,8 +9,9 @@ description = "ComfyUI reference implementation for the IPAdapter models. The IP
 readme = "README.md"
 license = { text = "GPL-3.0-only" }
 dependencies = [
+    "comfyui",
     "insightface",
-    "onnx!=1.16.2",
+    "onnx<1.16.2",
     "onnxruntime",
     "onnxruntime-gpu",
     "nvidia-cudnn-cu12",
