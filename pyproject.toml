@@ -7,14 +7,14 @@ name = "comfyui_ipadapter_plus"
 version = "2.0.0"
 description = "ComfyUI reference implementation for the IPAdapter models. The IPAdapter are very powerful models for image conditioning. The style and composition of a reference can be easily transferred to the generation. Think of it as a 1-image lora."
 readme = "README.md"
-license = { text = "GPL-3.0-only" }
+license = { file = "LICENSE" }
 dependencies = [
     "comfyui",
     "insightface",
     "onnx<1.16.2",
     "onnxruntime",
-    "onnxruntime-gpu",
-    "nvidia-cudnn-cu12",
+    "onnxruntime-gpu; platform_system != 'Darwin'",
+    "nvidia-cudnn-cu12; platform_system != 'Darwin'",
 ]
 
 [project.urls]
