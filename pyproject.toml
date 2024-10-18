@@ -28,8 +28,10 @@ PublisherId = "matteo"
 DisplayName = "ComfyUI_IPAdapter_plus"
 Icon = ""
 
-[tool.setuptools.packages]
-find = { }
+[tool.setuptools]
+packages = [
+    "comfyui_ipadapter_plus",
+]
 
 [tool.setuptools.package-dir]
-"" = "."
+"comfyui_ipadapter_plus" = "."
