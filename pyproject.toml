@@ -11,7 +11,7 @@ license = { file = "LICENSE" }
 dependencies = [
     "comfyui",
     "insightface",
-    "onnx<1.16.2",
+    "onnx>=1.18.0",
     "onnxruntime",
     "onnxruntime-gpu; platform_system != 'Darwin'",
     "nvidia-cudnn-cu12; platform_system != 'Darwin'",
