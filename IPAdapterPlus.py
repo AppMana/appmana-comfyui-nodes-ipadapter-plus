@@ -604,7 +604,7 @@ class IPAdapterUnifiedLoader:
                 print(f"\033[33mINFO: LoRA model loaded from {lora_file}\033[0m")
 
             if lora_strength > 0:
-                model, _ = load_lora_for_models(model, None, lora_model, lora_strength, 0)
+                model, _ = load_lora_for_models(model, None, lora_model, lora_strength, 0, None)
 
         # 4. Load the insightface model if needed
         if is_insightface:
